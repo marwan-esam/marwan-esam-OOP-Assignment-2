@@ -1,9 +1,10 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace SrpLab;
 
-/// <summary>
-/// Kitchen ticket: allergen scan from ingredients, cook ETA heuristics, and printed ticket layout.
-/// </summary>
-public sealed class KitchenTicket
+public class KitchenOrder
 {
     private readonly List<(string Item, List<string> Ingredients, int PrepMinutes)> _items = new();
 
@@ -12,11 +13,15 @@ public sealed class KitchenTicket
         _items.Add((item, ingredients.Select(i => i.Trim().ToLowerInvariant()).ToList(), prepMinutes));
     }
 
-    public IReadOnlyList<string> DetectAllergens()
+    public IReadOnlyList<(string Item, List<string> Ingredients, int PrepMinutes)> Items => _items;
+}
+
+public class AllergenDetector
+{
+    public IReadOnlyList<string> DetectAllergens(KitchenOrder order)
     {
-        // Regulatory allergen dictionary changes separately from ticket layout.
         var hits = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, ingredients, _) in _items)
+        foreach (var (_, ingredients, _) in order.Items)
         {
             foreach (var ing in ingredients)
             {
@@ -28,31 +33,34 @@ public sealed class KitchenTicket
         }
         return hits.OrderBy(x => x).ToList();
     }
+}
 
-    public int EstimatedReadyMinutes(int openStations)
+public class KitchenTimingHeuristics
+{
+    public int EstimatedReadyMinutes(KitchenOrder order, int openStations, int allergenCount)
     {
-        // Kitchen ops model ≠ printing.
         if (openStations <= 0) openStations = 1;
-        var sequential = _items.Sum(i => i.PrepMinutes);
+        var sequential = order.Items.Sum(i => i.PrepMinutes);
         var parallel = (int)Math.Ceiling(sequential / (double)openStations);
-        if (DetectAllergens().Count > 0) parallel += 3; // allergy protocol delay mixed in
-        var longest = _items.Count == 0 ? 0 : _items.Max(i => i.PrepMinutes);
+        if (allergenCount > 0) parallel += 3; 
+        var longest = order.Items.Count == 0 ? 0 : order.Items.Max(i => i.PrepMinutes);
         return Math.Max(parallel, longest);
     }
 
-    public string RenderThermalTicket(int orderNumber)
+    public string ExpoLaneHint(int allergenCount, int eta)
     {
-        // Hardware/formatting concerns — width, separators — change with printer vendor.
+        return allergenCount > 0 ? "LANE-ALLERGY" : eta > 20 ? "LANE-SLOW" : "LANE-FAST";
+    }
+}
+
+public class ThermalTicketFormatter
+{
+    public string RenderThermalTicket(int orderNumber, KitchenOrder order, int eta, IReadOnlyList<string> allergens)
+    {
         var width = 32;
         var line = new string('=', width);
-        var body = string.Join('\n', _items.Select(i => $"* {i.Item.ToUpperInvariant()} ({i.PrepMinutes}m)"));
-        var allergens = DetectAllergens();
+        var body = string.Join('\n', order.Items.Select(i => $"* {i.Item.ToUpperInvariant()} ({i.PrepMinutes}m)"));
         var allergyLine = allergens.Count == 0 ? "ALLERGENS: none" : "ALLERGENS: " + string.Join(",", allergens);
-        return $"{line}\nORDER #{orderNumber}\nETA {EstimatedReadyMinutes(2)} MIN\n{body}\n{allergyLine}\n{line}\n";
-    }
-
-    public string ExpoLaneHint()
-    {
-        return DetectAllergens().Count > 0 ? "LANE-ALLERGY" : EstimatedReadyMinutes(2) > 20 ? "LANE-SLOW" : "LANE-FAST";
+        return $"{line}\nORDER #{orderNumber}\nETA {eta} MIN\n{body}\n{allergyLine}\n{line}\n";
     }
 }

@@ -1,52 +1,100 @@
-﻿using SrpLab;
+using System;
+using System.Collections.Generic;
+using SrpLab;
 
-Console.WriteLine("SrpLab — 10 intentional SRP violations (refactor me)");
+Console.WriteLine("SrpLab — 10 intentional SRP violations (refactored)");
 Console.WriteLine("=================================================");
 
-var ward = new WardBoard();
-ward.AssignBed(1, "p-88", heartRate: 130, spo2: 89);
-Console.WriteLine(ward.BuildHandoffNote(1));
-Console.WriteLine(string.Join(" | ", ward.DrainPagerLog()));
+var bedTracker = new BedTracker();
+var acuityPolicy = new ClinicalAcuityPolicy();
+var pagerPolicy = new PagerEscalationPolicy();
+var handoffFormatter = new HandoffNoteFormatter();
+
+bedTracker.AssignBed(1, "p-88");
+var hr = 130;
+var spo2 = 89;
+var acuity = acuityPolicy.ScoreAcuity(hr, spo2);
+pagerPolicy.EvaluateAcuity(1, acuity);
+
+Console.WriteLine(handoffFormatter.BuildHandoffNote(1, bedTracker.GetPatient(1), acuity));
+Console.WriteLine(string.Join(" | ", pagerPolicy.DrainPagerLog()));
 
 var basket = new CheckoutBasket();
 basket.AddLine("SKU-1", 40m, 2);
-basket.ApplyCouponText("SAVE10");
-basket.EnableGiftWrap();
-Console.WriteLine($"basket total={basket.GrandTotal()} auth={basket.AuthorizePaymentStub("4242")}");
+var couponParser = new CouponParser();
+var discount = couponParser.DiscountAmount("SAVE10", basket.SubTotal());
+var wrapPolicy = new GiftWrapPolicy();
+var fee = wrapPolicy.CalculateGiftWrapFee(true);
+var grandTotal = Math.Max(0m, basket.SubTotal() - discount + fee);
+var gateway = new PaymentGatewayStub();
 
-var ticket = new SupportTicket("T-1", "cannot login", "prod is down for me", DateTimeOffset.UtcNow);
-Console.WriteLine(ticket.DraftPublicReply("Nora"));
+Console.WriteLine($"basket total={grandTotal} auth={gateway.AuthorizePaymentStub(grandTotal, "4242", basket.Lines.Count)}");
 
-var loan = new LoanDesk(60_000m, 640, 4, hasCollateral: false);
-Console.WriteLine(loan.DecisionLetter("Omar"));
+var ticketData = new TicketData("T-1", "cannot login", "prod is down for me", DateTimeOffset.UtcNow);
+var priorityScanner = new PriorityScanner();
+var priority = priorityScanner.RecalculatePriorityFromText(ticketData);
+var slaPolicy = new SlaPolicy();
+var deadline = slaPolicy.SlaDeadline(ticketData.OpenedAt, priority);
+var publicReply = new PublicReplyFormatter();
 
-var course = new CourseEnrollmentDesk("SEF-101", capacity: 1, tuition: 3000m);
-Console.WriteLine(course.Register("a@mail.com"));
-Console.WriteLine(course.Register("b@mail.com"));
-Console.WriteLine(course.WelcomePacketMarkdown("b@mail.com", "Bea"));
+Console.WriteLine(publicReply.DraftPublicReply("Nora", ticketData.Id, priority, deadline));
 
-var kitchen = new KitchenTicket();
-kitchen.AddItem("Pasta", new[] { "wheat", "milk" }, 12);
-Console.WriteLine(kitchen.RenderThermalTicket(42));
+var loanApp = new LoanApplication(60_000m, 640, 4, hasCollateral: false);
+var riskAssessor = new RiskAssessor();
+var riskScore = riskAssessor.RiskScore(loanApp);
+var isEligible = riskAssessor.IsEligible(riskScore, loanApp.CreditScore);
+var compliance = new ComplianceChecklist();
+var docs = compliance.RequiredDocuments(loanApp, isEligible);
+var letterFormatter = new DecisionLetterFormatter();
 
-var sub = new SubscriptionBilling("c-9", 99m, new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1));
-sub.RegisterFailedPayment();
-Console.WriteLine(sub.DunningEmail("Sara", new DateOnly(2026, 9, 20)));
+Console.WriteLine(letterFormatter.DecisionLetter("Omar", loanApp.RequestedAmount, riskScore, isEligible, docs));
 
-var pick = new WarehousePickList();
-pick.AddNeed("BOLT", "A", 3, 10, 7);
-pick.AddNeed("NUT", "B", 1, 5, 5);
-Console.WriteLine(pick.PickerScript());
+var courseDesk = new CourseEnrollmentDesk("SEF-101", 1);
+Console.WriteLine(courseDesk.Register("a@mail.com"));
+Console.WriteLine(courseDesk.Register("b@mail.com"));
+var welcomeFormatter = new WelcomePacketFormatter();
+Console.WriteLine(welcomeFormatter.WelcomePacketMarkdown("SEF-101", "b@mail.com", "Bea", courseDesk));
 
-var grades = new GradeBook();
+var kitchenOrder = new KitchenOrder();
+kitchenOrder.AddItem("Pasta", new[] { "wheat", "milk" }, 12);
+var allergenDetector = new AllergenDetector();
+var allergens = allergenDetector.DetectAllergens(kitchenOrder);
+var timingHeuristics = new KitchenTimingHeuristics();
+var eta = timingHeuristics.EstimatedReadyMinutes(kitchenOrder, 2, allergens.Count);
+var ticketFormatter = new ThermalTicketFormatter();
+Console.WriteLine(ticketFormatter.RenderThermalTicket(42, kitchenOrder, eta, allergens));
+
+var subProration = new SubscriptionProration(99m, new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 1));
+var tracker = new PaymentStatusTracker();
+tracker.RegisterFailedPayment();
+var amount = subProration.Prorate(new DateOnly(2026, 9, 1));
+var invoiceNumber = InvoiceNumberGenerator.NextInvoiceNumber(subProration.PeriodStart);
+var dunningFormatter = new DunningEmailFormatter();
+Console.WriteLine(dunningFormatter.DunningEmail("Sara", new DateOnly(2026, 9, 20), tracker.FailedPayments, amount, invoiceNumber));
+
+var pickTracker = new PickListTracker();
+pickTracker.AddNeed("BOLT", "A", 3, 10, 7);
+pickTracker.AddNeed("NUT", "B", 1, 5, 5);
+var routing = new RoutingHeuristics();
+var allocator = new InventoryAllocator();
+var scriptFormatter = new PickerScriptFormatter();
+Console.WriteLine(scriptFormatter.PickerScript(routing, allocator, pickTracker));
+
+var grades = new GradeAggregator();
 grades.Record("s1", 92);
 grades.Record("s1", 88);
-Console.WriteLine(grades.TranscriptPlain("s1", "Ali"));
+var academicPolicy = new AcademicPolicy();
+var avg = grades.Average("s1");
+var letter = academicPolicy.Letter(avg);
+var honorRoll = academicPolicy.MeetsHonorRoll(avg);
+var transcriptFormatter = new TranscriptFormatter();
+Console.WriteLine(transcriptFormatter.TranscriptPlain("s1", "Ali", avg, letter, honorRoll));
 
-var appt = new AppointmentDesk(new TimeOnly(9, 0), new TimeOnly(17, 0), 30);
-var slot = appt.FindNextSlot(DateTimeOffset.Parse("2026-09-21T08:00:00Z"), 48);
+var clinicPolicy = new ClinicSchedulePolicy(new TimeOnly(9, 0), new TimeOnly(17, 0), 30);
+var scheduler = new AppointmentScheduler(clinicPolicy);
+var slot = scheduler.FindNextSlot(DateTimeOffset.Parse("2026-09-21T08:00:00Z"), 48);
 if (slot is null) throw new InvalidOperationException("no slot");
-appt.TryBook(slot.Value);
-Console.WriteLine(appt.SmsReminder(slot.Value, "0100"));
+scheduler.TryBook(slot.Value);
+Console.WriteLine(SmsReminderFormatter.SmsReminder(slot.Value, "0100"));
 
-Console.WriteLine("Done. Now split responsibilities — without breaking behavior.");
+Console.WriteLine("Done. Responsibilities are split!");

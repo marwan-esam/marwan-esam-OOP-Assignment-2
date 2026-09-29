@@ -1,63 +1,71 @@
+using System;
+using System.Collections.Generic;
+
 namespace SrpLab;
 
-/// <summary>
-/// Loan desk: eligibility arithmetic, required-document lists, and rejection letter prose.
-/// </summary>
-public sealed class LoanDesk
+public class LoanApplication
 {
     public decimal RequestedAmount { get; }
     public int CreditScore { get; }
     public int EmploymentMonths { get; }
     public bool HasCollateral { get; }
 
-    public LoanDesk(decimal requestedAmount, int creditScore, int employmentMonths, bool hasCollateral)
+    public LoanApplication(decimal requestedAmount, int creditScore, int employmentMonths, bool hasCollateral)
     {
         RequestedAmount = requestedAmount;
         CreditScore = creditScore;
         EmploymentMonths = employmentMonths;
         HasCollateral = hasCollateral;
     }
+}
 
-    public decimal RiskScore()
+public class RiskAssessor
+{
+    public decimal RiskScore(LoanApplication app)
     {
-        // Risk model will change with risk committee — not with letter templates.
         decimal score = 100m;
-        score -= Math.Max(0, 700 - CreditScore) * 0.15m;
-        if (EmploymentMonths < 6) score -= 20m;
-        if (RequestedAmount > 50_000m && !HasCollateral) score -= 25m;
-        if (RequestedAmount > 150_000m) score -= 10m;
+        score -= Math.Max(0, 700 - app.CreditScore) * 0.15m;
+        if (app.EmploymentMonths < 6) score -= 20m;
+        if (app.RequestedAmount > 50_000m && !app.HasCollateral) score -= 25m;
+        if (app.RequestedAmount > 150_000m) score -= 10m;
         return Math.Clamp(score, 0m, 100m);
     }
 
-    public bool IsEligible() => RiskScore() >= 55m && CreditScore >= 580;
+    public bool IsEligible(decimal riskScore, int creditScore) => riskScore >= 55m && creditScore >= 580;
+}
 
-    public IReadOnlyList<string> RequiredDocuments()
+public class ComplianceChecklist
+{
+    public IReadOnlyList<string> RequiredDocuments(LoanApplication app, bool isEligible)
     {
-        // Compliance checklist changes with regulation, independently of risk formula.
         var docs = new List<string> { "National ID", "Proof of income (3 months)" };
-        if (RequestedAmount > 40_000m) docs.Add("Bank statements (6 months)");
-        if (HasCollateral) docs.Add("Collateral ownership deed");
-        if (EmploymentMonths < 12) docs.Add("Employer letter");
-        if (!IsEligible()) docs.Add("Manual underwriter referral form");
+        if (app.RequestedAmount > 40_000m) docs.Add("Bank statements (6 months)");
+        if (app.HasCollateral) docs.Add("Collateral ownership deed");
+        if (app.EmploymentMonths < 12) docs.Add("Employer letter");
+        if (!isEligible) docs.Add("Manual underwriter referral form");
         return docs;
     }
+}
 
-    public string DecisionLetter(string applicantName)
+public class DecisionLetterFormatter
+{
+    public string DecisionLetter(string applicantName, decimal requestedAmount, decimal riskScore, bool isEligible, IReadOnlyList<string> docs)
     {
-        // Legal/comms wording ≠ underwriting math.
-        if (IsEligible())
+        if (isEligible)
         {
-            return $"Dear {applicantName},\nYour request for {RequestedAmount:C} is pre-approved (risk {RiskScore():0}).\n" +
-                   $"Please upload: {string.Join("; ", RequiredDocuments())}.\n";
+            return $"Dear {applicantName},\nYour request for {requestedAmount:C} is pre-approved (risk {riskScore:0}).\n" +
+                   $"Please upload: {string.Join("; ", docs)}.\n";
         }
 
-        return $"Dear {applicantName},\nWe are unable to approve {RequestedAmount:C} at this time.\n" +
-               $"Reference risk={RiskScore():0}. You may reapply after improving documentation.\n";
+        return $"Dear {applicantName},\nWe are unable to approve {requestedAmount:C} at this time.\n" +
+               $"Reference risk={riskScore:0}. You may reapply after improving documentation.\n";
     }
+}
 
-    public string UnderwriterCsvRow(string applicationId)
+public class UnderwriterCsvExporter
+{
+    public string UnderwriterCsvRow(string applicationId, LoanApplication app, decimal riskScore, bool isEligible)
     {
-        // Analytics export schema is yet another reason to change.
-        return $"{applicationId},{CreditScore},{EmploymentMonths},{(HasCollateral ? 1 : 0)},{RiskScore():0.00},{(IsEligible() ? "Y" : "N")}";
+        return $"{applicationId},{app.CreditScore},{app.EmploymentMonths},{(app.HasCollateral ? 1 : 0)},{riskScore:0.00},{(isEligible ? "Y" : "N")}";
     }
 }

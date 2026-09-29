@@ -1,22 +1,23 @@
+using System;
+using System.Collections.Generic;
+
 namespace SrpLab;
 
-/// <summary>
-/// Course enrollment: capacity, waitlist math, welcome-packet markdown, and invoice lines.
-/// </summary>
-public sealed class CourseEnrollmentDesk
+public class CourseEnrollmentDesk
 {
     private readonly HashSet<string> _seated = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _waitlist = new();
     public int Capacity { get; }
-    public decimal Tuition { get; }
     public string CourseCode { get; }
 
-    public CourseEnrollmentDesk(string courseCode, int capacity, decimal tuition)
+    public CourseEnrollmentDesk(string courseCode, int capacity)
     {
         CourseCode = courseCode;
         Capacity = capacity;
-        Tuition = tuition;
     }
+    
+    public IReadOnlySet<string> Seated => _seated;
+    public int WaitlistCount => _waitlist.Count;
 
     public string Register(string studentEmail)
     {
@@ -42,25 +43,8 @@ public sealed class CourseEnrollmentDesk
         return idx < 0 ? -1 : idx + 1;
     }
 
-    public string WelcomePacketMarkdown(string studentEmail, string studentName)
-    {
-        // Content design changes with academy marketing — not with seat algorithms.
-        var status = _seated.Contains(studentEmail) ? "confirmed seat" : $"waitlist #{WaitlistPosition(studentEmail)}";
-        return $"# Welcome to {CourseCode}\nHi {studentName},\nYour status: **{status}**.\n" +
-               $"Bring a laptop. Discord onboarding link: https://example.invalid/{CourseCode.ToLowerInvariant()}\n";
-    }
-
-    public string TuitionInvoiceLine(string studentEmail)
-    {
-        // Finance formatting / tax later — separate from enrollment capacity.
-        if (!_seated.Contains(studentEmail)) return $"{CourseCode},WAITLIST,0.00";
-        var vat = Math.Round(Tuition * 0.14m, 2);
-        return $"{CourseCode},TUITION,{Tuition:0.00},VAT,{vat:0.00},TOTAL,{(Tuition + vat):0.00}";
-    }
-
     public void PromoteFromWaitlist(int seats)
     {
-        // Operational promotion policy mixed with messaging responsibilities above.
         while (seats > 0 && _waitlist.Count > 0 && _seated.Count < Capacity)
         {
             var next = _waitlist[0];
@@ -68,5 +52,33 @@ public sealed class CourseEnrollmentDesk
             _seated.Add(next);
             seats--;
         }
+    }
+}
+
+public class WelcomePacketFormatter
+{
+    public string WelcomePacketMarkdown(string courseCode, string studentEmail, string studentName, CourseEnrollmentDesk desk)
+    {
+        var isSeated = desk.Seated.Contains(studentEmail);
+        var status = isSeated ? "confirmed seat" : $"waitlist #{desk.WaitlistPosition(studentEmail)}";
+        return $"# Welcome to {courseCode}\nHi {studentName},\nYour status: **{status}**.\n" +
+               $"Bring a laptop. Discord onboarding link: https://example.invalid/{courseCode.ToLowerInvariant()}\n";
+    }
+}
+
+public class TuitionInvoice
+{
+    public decimal Tuition { get; }
+
+    public TuitionInvoice(decimal tuition)
+    {
+        Tuition = tuition;
+    }
+
+    public string TuitionInvoiceLine(string courseCode, string studentEmail, CourseEnrollmentDesk desk)
+    {
+        if (!desk.Seated.Contains(studentEmail)) return $"{courseCode},WAITLIST,0.00";
+        var vat = Math.Round(Tuition * 0.14m, 2);
+        return $"{courseCode},TUITION,{Tuition:0.00},VAT,{vat:0.00},TOTAL,{(Tuition + vat):0.00}";
     }
 }

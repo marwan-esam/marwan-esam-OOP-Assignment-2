@@ -1,21 +1,15 @@
+using System;
+
 namespace SrpLab;
 
-/// <summary>
-/// Subscription billing: proration math, invoice number minting, and dunning email bodies.
-/// </summary>
-public sealed class SubscriptionBilling
+public class SubscriptionProration
 {
-    private static int _invoiceSeq = 1000;
-
-    public string CustomerId { get; }
     public decimal MonthlyPrice { get; }
     public DateOnly PeriodStart { get; }
     public DateOnly PeriodEnd { get; }
-    public int FailedPayments { get; private set; }
 
-    public SubscriptionBilling(string customerId, decimal monthlyPrice, DateOnly periodStart, DateOnly periodEnd)
+    public SubscriptionProration(decimal monthlyPrice, DateOnly periodStart, DateOnly periodEnd)
     {
-        CustomerId = customerId;
         MonthlyPrice = monthlyPrice;
         PeriodStart = periodStart;
         PeriodEnd = periodEnd;
@@ -23,7 +17,6 @@ public sealed class SubscriptionBilling
 
     public decimal Prorate(DateOnly activeFrom)
     {
-        // Finance calendar rules change independently of email copy.
         if (activeFrom <= PeriodStart) return MonthlyPrice;
         if (activeFrom >= PeriodEnd) return 0m;
         var totalDays = PeriodEnd.DayNumber - PeriodStart.DayNumber;
@@ -31,33 +24,43 @@ public sealed class SubscriptionBilling
         var used = PeriodEnd.DayNumber - activeFrom.DayNumber;
         return Math.Round(MonthlyPrice * used / totalDays, 2);
     }
+}
 
-    public string NextInvoiceNumber()
+public static class InvoiceNumberGenerator
+{
+    private static int _invoiceSeq = 1000;
+
+    public static string NextInvoiceNumber(DateOnly periodStart)
     {
-        // Numbering scheme / fiscal prefixes — ops concern, not pricing.
         var n = ++_invoiceSeq;
-        return $"INV-{PeriodStart:yyyyMM}-{n:D5}";
+        return $"INV-{periodStart:yyyyMM}-{n:D5}";
     }
+}
 
+public class PaymentStatusTracker
+{
+    public int FailedPayments { get; private set; }
     public void RegisterFailedPayment() => FailedPayments++;
+}
 
-    public string DunningEmail(string customerName, DateOnly asOf)
+public class DunningEmailFormatter
+{
+    public string DunningEmail(string customerName, DateOnly asOf, int failedPayments, decimal amount, string invoiceNumber)
     {
-        // Collections tone & legal boilerplate ≠ proration formula.
-        var amount = Prorate(PeriodStart);
-        var invoice = NextInvoiceNumber(); // side-effect while composing mail — nasty on purpose
-        var severity = FailedPayments switch
+        var severity = failedPayments switch
         {
             <= 1 => "friendly reminder",
             2 => "second notice",
             _ => "final notice before suspension"
         };
-        return $"Subject: {severity} {invoice}\nHi {customerName},\nBalance {amount:C} as of {asOf:o} ({FailedPayments} failures).\n";
+        return $"Subject: {severity} {invoiceNumber}\nHi {customerName},\nBalance {amount:C} as of {asOf:o} ({failedPayments} failures).\n";
     }
+}
 
-    public string LedgerJournalLine(DateOnly activeFrom)
+public class LedgerJournalExporter
+{
+    public string LedgerJournalLine(string customerId, string invoiceNumber, decimal amount)
     {
-        // Accounting export format is another axis of change.
-        return $"{CustomerId},{NextInvoiceNumber()},{Prorate(activeFrom):0.00},AR-SUB";
+        return $"{customerId},{invoiceNumber},{amount:0.00},AR-SUB";
     }
 }
